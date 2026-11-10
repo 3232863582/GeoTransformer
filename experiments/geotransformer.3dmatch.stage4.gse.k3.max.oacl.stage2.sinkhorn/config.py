@@ -13,7 +13,7 @@ _C = edict()
 _C.seed = 7351
 
 # dirs
-_C.working_dir = osp.dirname(osp.realpath(__file__))
+_C.working_dir = osp.dirname(osp.realpath(__file__))#获取当前 config.py 的绝对路径
 _C.root_dir = osp.dirname(osp.dirname(_C.working_dir))
 _C.exp_name = osp.basename(_C.working_dir)
 _C.output_dir = osp.join(_C.root_dir, 'output', _C.exp_name)
@@ -23,7 +23,7 @@ _C.event_dir = osp.join(_C.output_dir, 'events')
 _C.feature_dir = osp.join(_C.output_dir, 'features')
 _C.registration_dir = osp.join(_C.output_dir, 'registration')
 
-ensure_dir(_C.output_dir)
+ensure_dir(_C.output_dir)#目录不存在就创建（含所有中间父目录），已存在则什么都不做。
 ensure_dir(_C.snapshot_dir)
 ensure_dir(_C.log_dir)
 ensure_dir(_C.event_dir)
@@ -31,7 +31,7 @@ ensure_dir(_C.feature_dir)
 ensure_dir(_C.registration_dir)
 
 # data
-_C.data = edict()
+_C.data = edict()#支持属性访问的字典
 _C.data.dataset_root = osp.join(_C.root_dir, 'data', '3DMatch')
 
 # train data
@@ -51,8 +51,8 @@ _C.test.point_limit = None
 
 # evaluation
 _C.eval = edict()
-_C.eval.acceptance_overlap = 0.0
-_C.eval.acceptance_radius = 0.1
+_C.eval.acceptance_overlap = 0.0#粗匹配（coarse matching）指标 PIR 的判定阈值
+_C.eval.acceptance_radius = 0.1#细匹配内点半径
 _C.eval.inlier_ratio_threshold = 0.05
 _C.eval.rmse_threshold = 0.2
 _C.eval.rre_threshold = 15.0

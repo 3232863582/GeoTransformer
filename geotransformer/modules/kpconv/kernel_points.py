@@ -386,6 +386,67 @@ def kernel_point_optimization_debug(
     return kernel_points * radius, saved_gradient_norms
 
 
+def _read_ply_vertices(file_path):
+    """读取 PLY 顶点坐标 (N, 3)，不依赖 Open3D。
+
+    Windows 下 RPly / Open3D 无法打开含非 ASCII 字符（如中文）的路径，
+    会静默返回空点云；这里改用 numpy 直接解析。
+    """
+    ply_types = {
+        'char': 'i1', 'int8': 'i1',
+        'uchar': 'u1', 'uint8': 'u1',
+        'short': 'i2', 'int16': 'i2',
+        'ushort': 'u2', 'uint16': 'u2',
+        'int': 'i4', 'int32': 'i4',
+        'uint': 'u4', 'uint32': 'u4',
+        'float': 'f4', 'float32': 'f4',
+        'double': 'f8', 'float64': 'f8',
+    }
+
+    with open(file_path, 'rb') as f:
+        if f.readline().strip() != b'ply':
+            raise ValueError('invalid PLY file: {}'.format(file_path))
+
+        fmt = None
+        elements = []
+        while True:
+            line = f.readline()
+            if not line:
+                raise ValueError('incomplete PLY header: {}'.format(file_path))
+            text = line.decode('ascii', 'ignore').strip()
+            if text == 'end_header':
+                break
+            if not text or text.startswith('comment') or text.startswith('obj_info'):
+                continue
+            tokens = text.split()
+            if tokens[0] == 'format':
+                fmt = tokens[1]
+            elif tokens[0] == 'element':
+                elements.append({'name': tokens[1], 'count': int(tokens[2]), 'props': []})
+            elif tokens[0] == 'property':
+                if tokens[1] == 'list':
+                    elements[-1]['props'].append(None)
+                else:
+                    elements[-1]['props'].append((tokens[2], ply_types[tokens[1]]))
+
+        vertex = next(e for e in elements if e['name'] == 'vertex')
+        names = [name for name, _ in vertex['props']]
+        columns = [names.index(k) for k in ('x', 'y', 'z')]
+
+        if fmt in ('binary_little_endian', 'binary_big_endian'):
+            endian = '<' if fmt == 'binary_little_endian' else '>'
+            dtype = np.dtype([(name, endian + code) for name, code in vertex['props']])
+            data = np.frombuffer(f.read(dtype.itemsize * vertex['count']), dtype=dtype, count=vertex['count'])
+            return np.stack([data['x'], data['y'], data['z']], axis=1).astype(np.float32)
+
+        if fmt == 'ascii':
+            values = np.array(f.read().decode('ascii', 'ignore').split(), dtype=np.float32)
+            values = values[: vertex['count'] * len(names)].reshape(-1, len(names))
+            return values[:, columns]
+
+        raise ValueError('unsupported PLY format: {}'.format(fmt))
+
+
 def load_kernels(radius, num_kpoints, dimension, fixed, lloyd=False):
     # Kernel directory
     # kernel_dir = osp.join('kernels', 'dispositions')
@@ -420,8 +481,8 @@ def load_kernels(radius, num_kpoints, dimension, fixed, lloyd=False):
         pcd.points = o3d.utility.Vector3dVector(kernel_points)
         o3d.io.write_point_cloud(kernel_file, pcd)
     else:
-        pcd = o3d.io.read_point_cloud(kernel_file)
-        kernel_points = np.array(pcd.points).astype(np.float32)
+        # NOTE: 不要用 o3d.io.read_point_cloud：Windows 中文路径会读取失败并返回空点云
+        kernel_points = _read_ply_vertices(kernel_file)
 
     # Random roations for the kernel
     # N.B. 4D random rotations not supported yet
