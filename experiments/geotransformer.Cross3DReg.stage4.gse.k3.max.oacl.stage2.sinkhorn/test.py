@@ -69,7 +69,9 @@ class Tester(SingleTester):
 
         ensure_dir(osp.join(self.output_dir, scene_name))
         file_name = osp.join(self.output_dir, scene_name, f'{ref_id}_{src_id}.npz')
-        np.savez_compressed(
+        # 不压缩：单样本 savez_compressed 约 300ms，savez 约 10ms，
+        # eval.py 读取也从 ~36ms 降到 ~6ms（多数字段本身已接近随机）。
+        np.savez(
             file_name,
             ref_points=release_cuda(output_dict['ref_points']),
             src_points=release_cuda(output_dict['src_points']),

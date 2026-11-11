@@ -69,8 +69,9 @@ from geotransformer.utils.pointcloud import (
     get_transform_from_rotation_translation,
 )
 
-# DEFAULT_DATASET_ROOT = r'D:\ourdata\Cross3DReg'
-DEFAULT_DATASET_ROOT = r'D:\zj\Cross3DReg'
+DEFAULT_DATASET_ROOT = r'/media/lxy/新加卷1/zj/Cross3DReg'
+# DEFAULT_DATASET_ROOT = r'D:\zj\Cross3DReg'
+
 # Cross3DReg 只有 train / val / test 划分；评估脚本里的 benchmark 名称
 # 一律映射到 test（本数据集没有 overlap 字段，无法区分 3DMatch/3DLoMatch）
 
@@ -126,6 +127,14 @@ def _read_ply_xyz_numpy(file_path):
 
         if fmt in ('binary_little_endian', 'binary_big_endian'):
             endian = '<' if fmt == 'binary_little_endian' else '>'
+            count = vertex['count']
+            codes = [code for _, code in vertex['props']]
+            if names == ['x', 'y', 'z'] and len(set(codes)) == 1:
+                # 常见情况（Open3D 导出，只有 x/y/z）：一次 frombuffer 再 reshape，
+                # 比构造 structured dtype 再 np.stack 三列快约 2 倍。
+                base_dtype = np.dtype(endian + codes[0])
+                data = np.frombuffer(f.read(base_dtype.itemsize * count * 3), dtype=base_dtype, count=count * 3)
+                return data.reshape(count, 3).astype(np.float64)
             dtype = np.dtype([(name, endian + code) for name, code in vertex['props']])
             data = np.frombuffer(f.read(dtype.itemsize * vertex['count']), dtype=dtype, count=vertex['count'])
             return np.stack([data['x'], data['y'], data['z']], axis=1).astype(np.float64)
@@ -139,15 +148,12 @@ def _read_ply_xyz_numpy(file_path):
 
 
 def read_ply_points(file_path):
-    """读取 PLY 点云，返回 (N, 3) float64 数组。优先使用 plyfile。"""
-    try:
-        from plyfile import PlyData
-    except ImportError:
-        return _read_ply_xyz_numpy(file_path)
+    """读取 PLY 点云，返回 (N, 3) float64 数组。
 
-    vertex = PlyData.read(file_path)['vertex']
-    points = np.stack([np.asarray(vertex['x']), np.asarray(vertex['y']), np.asarray(vertex['z'])], axis=1)
-    return points.astype(np.float64)
+    直接按二进制头部偏移解析，不再经过 plyfile（本数据集只有 x/y/z 三个
+    double 属性，实测快约 2 倍，也少一次 Python 层属性解析）。
+    """
+    return _read_ply_xyz_numpy(file_path)
 
 def voxel_downsample_to_target(pcd_path, target_num_points=30000, initial_voxel=0.1, max_iter=25):
         pcd = o3d.io.read_point_cloud(pcd_path)

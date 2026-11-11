@@ -49,7 +49,7 @@ _C.test = edict()
 _C.test.batch_size = 1
 # Windows 下每个 worker 都会重新加载 torch/CUDA DLL，8 个进程很容易触发
 # "WinError 1455 页面文件太小"，测试时用 0（训练可按内存情况调成 2~4）
-_C.test.num_workers = 0
+_C.test.num_workers = 8
 _C.test.point_limit = 30000
 
 # evaluation
