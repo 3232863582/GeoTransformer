@@ -56,7 +56,7 @@ import pickle
 import random
 import warnings
 from typing import Dict
-
+import open3d as o3d
 import numpy as np
 import torch
 import torch.utils.data
@@ -147,6 +147,39 @@ def read_ply_points(file_path):
     points = np.stack([np.asarray(vertex['x']), np.asarray(vertex['y']), np.asarray(vertex['z'])], axis=1)
     return points.astype(np.float64)
 
+def voxel_downsample_to_target(pcd_path, target_num_points=500, initial_voxel=0.1, max_iter=25):
+        pcd = o3d.io.read_point_cloud(pcd_path)
+        # 指数探测：确定包含目标点数的体素区间 [lower, upper]
+        voxel_size = initial_voxel
+        num_points = len(pcd.voxel_down_sample(voxel_size).points)
+
+        if num_points < target_num_points:
+            lower = 0.0
+            upper = voxel_size
+        else:
+            lower = voxel_size
+            upper = voxel_size
+            while num_points > target_num_points:
+                upper *= 2
+                num_points = len(pcd.voxel_down_sample(upper).points)
+
+        # 二分逼近 target ± 5%
+        best = pcd.voxel_down_sample(upper)
+        for _ in range(max_iter):
+            voxel_size = (lower + upper) / 2
+            down_pcd = pcd.voxel_down_sample(voxel_size)
+            num_points = len(down_pcd.points)
+
+            if abs(num_points - target_num_points) < target_num_points * 0.05:
+                return np.asarray(down_pcd.points)  # 控制误差在±5%内
+
+            if num_points > target_num_points:
+                lower = voxel_size
+            else:
+                upper = voxel_size
+
+            best = down_pcd
+        return np.asarray(best.points)  # 最终返回最后一次采样结果
 
 def load_metadata(file_path):
     """读取 metadata .pkl（joblib 或 pickle 序列化的文件均可）。"""
@@ -182,6 +215,32 @@ def find_correspondences(ref_points, src_points, transform, matching_radius):
     if len(corr_indices) == 0:
         return np.zeros((0, 2), dtype=np.int64)
     return np.array(corr_indices, dtype=np.int64)
+
+
+# 调试开关：为 True 时每次取样本都会弹出窗口显示两片点云（阻塞式，训练前请置 False）
+SHOW_POINT_CLOUD = False
+
+
+def show_point_clouds(ref_points, src_points, rotation, translation):
+    """弹出 Open3D 窗口显示两片点云。
+
+    ref 为红色；src 用真值变换对齐到 ref 坐标系后显示为蓝色。
+    """
+    import open3d as o3d
+
+    src_in_ref = src_points @ rotation.T + translation
+    ref_pcd = o3d.geometry.PointCloud()
+    ref_pcd.points = o3d.utility.Vector3dVector(ref_points)
+    ref_pcd.paint_uniform_color([1.0, 0.0, 0.0])
+
+    src_pcd = o3d.geometry.PointCloud()
+    src_pcd.points = o3d.utility.Vector3dVector(src_in_ref)
+    src_pcd.paint_uniform_color([0.0, 0.6, 1.0])
+
+    o3d.visualization.draw_geometries(
+        [ref_pcd, src_pcd],
+        window_name='Cross3DReg: ref=array(red)  src=lidar(blue, GT-aligned)',
+    )
 
 
 def estimate_overlap(ref_points, src_points, transform, radius):
@@ -266,16 +325,16 @@ class Cross3DRegDataset(torch.utils.data.Dataset):
                 warnings.warn('metadata 中没有 "overlap" 字段，overlap_threshold 被忽略。')
 
     def __len__(self):
-        return len(self.metadata_list)
+        # return len(self.metadata_list)
+        return 100
+
+
 
     def _load_point_cloud(self, relative_path):
         # metadata 里的路径使用 Windows 反斜杠，统一成 '/' 以保证跨平台可用
         file_path = osp.join(self.dataset_root, relative_path.replace('\\', '/'))
-        points = read_ply_points(file_path)
-        # NOTE: point_limit + num_workers > 1 时下采样结果不可复现
-        if self.point_limit is not None and points.shape[0] > self.point_limit:
-            indices = np.random.permutation(points.shape[0])[: self.point_limit]
-            points = points[indices]
+        # points = read_ply_points(file_path)
+        points = voxel_downsample_to_target(file_path)
         return points
 
     def _augment_point_cloud(self, ref_points, src_points, rotation, translation):
@@ -329,6 +388,10 @@ class Cross3DRegDataset(torch.utils.data.Dataset):
         # get point cloud: ref = pcd0 (array), src = pcd1 (lidar)
         ref_points = self._load_point_cloud(metadata['pcd0'])
         src_points = self._load_point_cloud(metadata['pcd1'])
+
+        # 调试：弹出窗口查看两片点云（红=ref/array，蓝=src/lidar 按真值对齐）
+        if SHOW_POINT_CLOUD:
+            show_point_clouds(ref_points, src_points, rotation, translation)
 
         # augmentation
         # if self.use_augmentation:
