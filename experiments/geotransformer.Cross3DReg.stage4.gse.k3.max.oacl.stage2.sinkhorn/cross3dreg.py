@@ -27,9 +27,11 @@ metadata 是 joblib 序列化的 ``list[dict]``，每条样本包含：
 ===============  =====================================================
 
 变换方向约定（已在本数据集上实测验证）：
-    metadata['transform'] 把 **pcd0(array) -> pcd1(lidar)**；
+    metadata['transform'] 把 **pcd0(array) -> pcd1(lidar)**，即 array -> lidar；
     而 GeoTransformer 全流程要求 ``data_dict['transform']`` 把 **src -> ref**。
-    因此这里取 ``ref = pcd0``、``src = pcd1``，并对 metadata['transform'] 求逆：:
+    本数据集 lidar 各帧已配准到同一全局坐标系（帧间最近邻距离约 8mm），
+    array 各帧各自漂移，因此取 ``ref = pcd1``（lidar，全局基准）、
+    ``src = pcd0``（array，待配准），transform 直接取 metadata 原值，无需求逆：:
 
         ref_points = src_points @ rotation.T + translation
 
@@ -67,8 +69,8 @@ from geotransformer.utils.pointcloud import (
     get_transform_from_rotation_translation,
 )
 
-DEFAULT_DATASET_ROOT = r'D:\ourdata\Cross3DReg'
-
+# DEFAULT_DATASET_ROOT = r'D:\ourdata\Cross3DReg'
+DEFAULT_DATASET_ROOT = r'D:\zj\Cross3DReg'
 # Cross3DReg 只有 train / val / test 划分；评估脚本里的 benchmark 名称
 # 一律映射到 test（本数据集没有 overlap 字段，无法区分 3DMatch/3DLoMatch）
 
@@ -147,7 +149,7 @@ def read_ply_points(file_path):
     points = np.stack([np.asarray(vertex['x']), np.asarray(vertex['y']), np.asarray(vertex['z'])], axis=1)
     return points.astype(np.float64)
 
-def voxel_downsample_to_target(pcd_path, target_num_points=500, initial_voxel=0.1, max_iter=25):
+def voxel_downsample_to_target(pcd_path, target_num_points=30000, initial_voxel=0.1, max_iter=25):
         pcd = o3d.io.read_point_cloud(pcd_path)
         # 指数探测：确定包含目标点数的体素区间 [lower, upper]
         voxel_size = initial_voxel
@@ -239,7 +241,7 @@ def show_point_clouds(ref_points, src_points, rotation, translation):
 
     o3d.visualization.draw_geometries(
         [ref_pcd, src_pcd],
-        window_name='Cross3DReg: ref=array(red)  src=lidar(blue, GT-aligned)',
+        window_name='Cross3DReg: ref=lidar(red)  src=array(blue, GT-aligned)',
     )
 
 
@@ -271,7 +273,8 @@ class Cross3DRegDataset(torch.utils.data.Dataset):
         matching_radius: 找对应点用的半径（return_corr_indices=True 时必填）
         rotated: 是否对两帧坐标分别施加随机旋转（训练扰动）
         invert_ground_truth: metadata['transform'] 是否为 ref->src 方向
-            （Cross3DReg 实测如此，默认 True；3DMatch 风格的 rotation/translation 不受影响）
+            （Cross3DReg 实测为 array->lidar，即 src->ref，默认 False 无需求逆；
+             3DMatch 风格的 rotation/translation 不受影响）
         compute_overlap: metadata 没有 overlap 字段时是否在线估计
         overlap_radius: 估计重叠率时的距离半径（米）
     """
@@ -288,14 +291,14 @@ class Cross3DRegDataset(torch.utils.data.Dataset):
         return_corr_indices=False,
         matching_radius=None,
         rotated=False,
-        invert_ground_truth=True,
+        invert_ground_truth=False,
         compute_overlap=False,
         overlap_radius=0.05,
     ):
         super().__init__()
 
-        if dataset_root is None:
-            dataset_root = DEFAULT_DATASET_ROOT
+
+        dataset_root = DEFAULT_DATASET_ROOT
         self.dataset_root = dataset_root
         self.metadata_root = osp.join(self.dataset_root, 'metadata')
 
@@ -333,8 +336,8 @@ class Cross3DRegDataset(torch.utils.data.Dataset):
     def _load_point_cloud(self, relative_path):
         # metadata 里的路径使用 Windows 反斜杠，统一成 '/' 以保证跨平台可用
         file_path = osp.join(self.dataset_root, relative_path.replace('\\', '/'))
-        # points = read_ply_points(file_path)
-        points = voxel_downsample_to_target(file_path)
+        points = read_ply_points(file_path)
+        # points = voxel_downsample_to_target(file_path)
         return points
 
     def _augment_point_cloud(self, ref_points, src_points, rotation, translation):
@@ -385,11 +388,11 @@ class Cross3DRegDataset(torch.utils.data.Dataset):
         # get transformation (src -> ref)
         rotation, translation = self._get_rotation_translation(metadata)
 
-        # get point cloud: ref = pcd0 (array), src = pcd1 (lidar)
-        ref_points = self._load_point_cloud(metadata['pcd0'])
-        src_points = self._load_point_cloud(metadata['pcd1'])
+        # get point cloud: ref = pcd1 (lidar, 全局基准), src = pcd0 (array, 待配准)
+        ref_points = self._load_point_cloud(metadata['pcd1'])
+        src_points = self._load_point_cloud(metadata['pcd0'])
 
-        # 调试：弹出窗口查看两片点云（红=ref/array，蓝=src/lidar 按真值对齐）
+        # 调试：弹出窗口查看两片点云（红=ref/lidar，蓝=src/array 按真值对齐）
         if SHOW_POINT_CLOUD:
             show_point_clouds(ref_points, src_points, rotation, translation)
 

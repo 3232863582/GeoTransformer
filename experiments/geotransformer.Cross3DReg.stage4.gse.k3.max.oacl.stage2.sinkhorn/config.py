@@ -38,7 +38,8 @@ _C.data.dataset_root = "D:\ourdata\Cross3DReg"
 _C.train = edict()
 _C.train.batch_size = 1
 _C.train.num_workers = 8
-_C.train.point_limit = 5000
+# _C.train.point_limit = 10000
+_C.train.point_limit = 30000
 _C.train.use_augmentation = True
 _C.train.augmentation_noise = 0.005
 _C.train.augmentation_rotation = 1.0
@@ -49,7 +50,7 @@ _C.test.batch_size = 1
 # Windows 下每个 worker 都会重新加载 torch/CUDA DLL，8 个进程很容易触发
 # "WinError 1455 页面文件太小"，测试时用 0（训练可按内存情况调成 2~4）
 _C.test.num_workers = 0
-_C.test.point_limit = None
+_C.test.point_limit = 30000
 
 # evaluation
 _C.eval = edict()
@@ -78,7 +79,8 @@ _C.optim.grad_acc_steps = 1
 # model - backbone
 _C.backbone = edict()
 _C.backbone.num_stages = 4
-_C.backbone.init_voxel_size = 0.025
+# _C.backbone.init_voxel_size = 0.025
+_C.backbone.init_voxel_size = 0.5
 _C.backbone.kernel_size = 15
 _C.backbone.base_radius = 2.5
 _C.backbone.base_sigma = 2.0

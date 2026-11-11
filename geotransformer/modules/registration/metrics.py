@@ -28,7 +28,7 @@ def modified_chamfer_distance(raw_points, ref_points, src_points, gt_transform, 
     chamfer_distance_p_q = torch.sqrt(nn_sq_distances_p_q).mean(dim=-1)  # (B)
 
     # Q -> P_raw
-    composed_transform = torch.matmul(transform, torch.inverse(gt_transform))  # (B, 4, 4)
+    composed_transform = torch.matmul(transform, torch.inverse(gt_transform.cpu()).to(gt_transform.device))  # (B, 4, 4)
     aligned_raw_points = apply_transform(raw_points, composed_transform)  # (B, N_raw, 3)
     sq_dist_mat_q_p = pairwise_distance(ref_points, aligned_raw_points)  # (B, N_ref, N_raw)
     nn_sq_distances_q_p = sq_dist_mat_q_p.min(dim=-1)[0]  # (B, N_ref)
