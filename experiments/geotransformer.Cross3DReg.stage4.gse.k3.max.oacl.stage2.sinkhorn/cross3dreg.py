@@ -189,6 +189,14 @@ def voxel_downsample_to_target(pcd_path, target_num_points=30000, initial_voxel=
             best = down_pcd
         return np.asarray(best.points)  # 最终返回最后一次采样结果
 
+def _scene_key(value):
+    """把 8 / '8' / '08' 统一成 '08'，方便和 metadata 的 seq_id 比较。"""
+    try:
+        return f'{int(value):02d}'
+    except (TypeError, ValueError):
+        return str(value)
+
+
 def load_metadata(file_path):
     """读取 metadata .pkl（joblib 或 pickle 序列化的文件均可）。"""
     try:
@@ -269,7 +277,8 @@ class Cross3DRegDataset(torch.utils.data.Dataset):
 
     Args:
         dataset_root: 数据集根目录，默认 ``D:\ourdata\Cross3DReg``
-        subset: 'train' / 'val' / 'test'（也接受 '3DMatch' / '3DLoMatch'，映射到 'test'）
+        subset: 'train' / 'val' / 'test' / 'all'（'all' 合并三个 split，供按场景筛选用；
+                也接受 '3DMatch' / '3DLoMatch'，映射到 'test'）
         point_limit: 单帧点数上限，None 表示不限制
         use_augmentation: 是否做随机旋转 + 噪声增强
         augmentation_noise: 噪声幅度（米）
@@ -300,6 +309,7 @@ class Cross3DRegDataset(torch.utils.data.Dataset):
         invert_ground_truth=False,
         compute_overlap=False,
         overlap_radius=0.05,
+        scenes=None,
     ):
         super().__init__()
 
@@ -307,7 +317,7 @@ class Cross3DRegDataset(torch.utils.data.Dataset):
         dataset_root = DEFAULT_DATASET_ROOT
         self.dataset_root = dataset_root
         self.metadata_root = osp.join(self.dataset_root, 'metadata')
-
+        self.subset = subset
         self.point_limit = point_limit
         self.use_augmentation = use_augmentation
         self.aug_noise = augmentation_noise
@@ -322,10 +332,19 @@ class Cross3DRegDataset(torch.utils.data.Dataset):
         self.compute_overlap = compute_overlap
         self.overlap_radius = overlap_radius
 
-        metadata_path = osp.join(self.metadata_root, f'test.pkl')
-        if not osp.exists(metadata_path):
-            raise FileNotFoundError(f'找不到 metadata 文件: {metadata_path}')
-        self.metadata_list = load_metadata(metadata_path)
+        if self.subset == 'all':
+            # 合并三个 split，配合 scenes 参数实现“按场景 0~10 选测试集”
+            self.metadata_list = []
+            for split in ('train', 'val', 'test'):
+                split_path = osp.join(self.metadata_root, f'{split}.pkl')
+                if not osp.exists(split_path):
+                    raise FileNotFoundError(f'找不到 metadata 文件: {split_path}')
+                self.metadata_list += load_metadata(split_path)
+        else:
+            metadata_path = osp.join(self.metadata_root, f'{self.subset}.pkl')
+            if not osp.exists(metadata_path):
+                raise FileNotFoundError(f'找不到 metadata 文件: {metadata_path}')
+            self.metadata_list = load_metadata(metadata_path)
 
         if self.overlap_threshold is not None:
             if len(self.metadata_list) > 0 and 'overlap' in self.metadata_list[0]:
@@ -333,9 +352,16 @@ class Cross3DRegDataset(torch.utils.data.Dataset):
             else:
                 warnings.warn('metadata 中没有 "overlap" 字段，overlap_threshold 被忽略。')
 
+        # 按场景筛选（测试集由 cfg.data.test_scenes 控制；训练/验证不传则保持全部）
+        if scenes is not None:
+            allowed = {_scene_key(s) for s in scenes}
+            self.metadata_list = [x for x in self.metadata_list if _scene_key(x.get('seq_id')) in allowed]
+            if len(self.metadata_list) == 0:
+                raise ValueError(f'场景筛选后没有样本，scenes={scenes}')
+
     def __len__(self):
-        # return len(self.metadata_list)
-        return 100
+        return len(self.metadata_list)
+        # return 100
 
 
 
@@ -403,20 +429,20 @@ class Cross3DRegDataset(torch.utils.data.Dataset):
             show_point_clouds(ref_points, src_points, rotation, translation)
 
         # augmentation
-        # if self.use_augmentation:
-        #     ref_points, src_points, rotation, translation = self._augment_point_cloud(
-        #         ref_points, src_points, rotation, translation
-        #     )
+        if self.use_augmentation:
+            ref_points, src_points, rotation, translation = self._augment_point_cloud(
+                ref_points, src_points, rotation, translation
+            )
 
-        # if self.rotated:
-        #     ref_rotation = random_sample_rotation_v2()
-        #     ref_points = np.matmul(ref_points, ref_rotation.T)
-        #     rotation = np.matmul(ref_rotation, rotation)
-        #     translation = np.matmul(ref_rotation, translation)
-        #
-        #     src_rotation = random_sample_rotation_v2()
-        #     src_points = np.matmul(src_points, src_rotation.T)
-        #     rotation = np.matmul(rotation, src_rotation.T)
+        if self.rotated:
+            ref_rotation = random_sample_rotation_v2()
+            ref_points = np.matmul(ref_points, ref_rotation.T)
+            rotation = np.matmul(ref_rotation, rotation)
+            translation = np.matmul(ref_rotation, translation)
+
+            src_rotation = random_sample_rotation_v2()
+            src_points = np.matmul(src_points, src_rotation.T)
+            rotation = np.matmul(rotation, src_rotation.T)
 
         transform = get_transform_from_rotation_translation(rotation, translation)
 

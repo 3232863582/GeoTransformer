@@ -81,6 +81,9 @@ def point_to_node_partition(
         node_knn_indices (LongTensor): (M, K)
         node_knn_masks (BoolTensor) (M, K)
     """
+    # 点数少于 point_limit 时 topk 会越界（稀疏/退化帧），与 knn_partition 保持一致做夹取
+    point_limit = min(point_limit, points.shape[0])
+
     sq_dist_mat = pairwise_distance(nodes, points)  # (M, N)
 
     point_to_node = sq_dist_mat.min(dim=0)[1]  # (N,)
@@ -134,6 +137,7 @@ def point_to_node_partition_bug(
         node_knn_masks (BoolTensor) (M, K)
     """
     warnings.warn('There is a bug in this implementation. Use `point_to_node_partition` instead.')
+    point_limit = min(point_limit, points.shape[0])
     sq_dist_mat = pairwise_distance(nodes, points)  # (M, N)
 
     point_to_node = sq_dist_mat.min(dim=0)[1]  # (N,)

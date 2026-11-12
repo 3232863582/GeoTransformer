@@ -35,6 +35,10 @@ class CoarseMatchingLoss(nn.Module):
         neg_masks = torch.eq(overlaps, 0)
         pos_scales = torch.sqrt(overlaps * pos_masks.float())
 
+        # 兜底：没有正样本或负样本时，损失内部会对空集合求 mean 得到 NaN
+        if not pos_masks.any() or not neg_masks.any():
+            return feat_dists.sum() * 0.0
+
         loss = self.weighted_circle_loss(pos_masks, neg_masks, feat_dists, pos_scales)
 
         return loss
@@ -65,6 +69,10 @@ class FineMatchingLoss(nn.Module):
         labels[:, :-1, :-1] = gt_corr_map
         labels[:, :-1, -1] = slack_row_labels
         labels[:, -1, :-1] = slack_col_labels
+
+        # 兜底：没有任何标签时，mean() 得到 NaN
+        if not labels.any():
+            return matching_scores.sum() * 0.0
 
         loss = -matching_scores[labels].mean()
 
@@ -97,7 +105,8 @@ class Evaluator(nn.Module):
         super(Evaluator, self).__init__()
         self.acceptance_overlap = cfg.eval.acceptance_overlap
         self.acceptance_radius = cfg.eval.acceptance_radius
-        self.acceptance_rmse = cfg.eval.rmse_threshold
+        self.rre_threshold = cfg.eval.rre_threshold
+        self.rte_threshold = cfg.eval.rte_threshold
 
     @torch.no_grad()
     def evaluate_coarse(self, output_dict):
@@ -140,7 +149,10 @@ class Evaluator(nn.Module):
         realignment_transform = torch.matmul(torch.inverse(transform.cpu()).to(transform.device), est_transform)
         realigned_src_points_f = apply_transform(src_points, realignment_transform)
         rmse = torch.linalg.norm(realigned_src_points_f - src_points, dim=1).mean()
-        recall = torch.lt(rmse, self.acceptance_rmse).float()
+        # 配准召回：同时满足 RRE 和 RTE 阈值（RMSE 只作为报告指标）
+        recall = torch.logical_and(
+            torch.lt(rre, self.rre_threshold), torch.lt(rte, self.rte_threshold)
+        ).float()
 
         return rre, rte, rmse, recall
 
@@ -148,8 +160,8 @@ class Evaluator(nn.Module):
         c_precision = self.evaluate_coarse(output_dict)
         f_precision = self.evaluate_fine(output_dict, data_dict)
         rre, rte, rmse, recall = self.evaluate_registration(output_dict, data_dict)
-        print("\nError(R)", rre)
-        print("Error(T)", rte)
+        # print("\nError(R)", rre)
+        # print("Error(T)", rte)
         return {
             'PIR': c_precision,
             'IR': f_precision,

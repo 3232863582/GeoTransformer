@@ -74,11 +74,16 @@ def test_data_loader(cfg, benchmark):
         cfg.backbone.init_radius,
     )
 
+    # test_scenes 为 None 时只跑 test.pkl；指定数组时从 train+val+test 合并元数据中按场景筛选，
+    # 这样场景 0~10 都可以选（注意 00~07 来自训练/验证集）
+    test_scenes = getattr(cfg.data, 'test_scenes', None)
+    test_subset = 'all' if test_scenes is not None else 'test'
     test_dataset = crossdata(
         cfg.data.dataset_root,
-        benchmark,
+        test_subset,
         point_limit=cfg.test.point_limit,
         use_augmentation=False,
+        scenes=test_scenes,
     )
     test_loader = build_dataloader_stack_mode(
         test_dataset,

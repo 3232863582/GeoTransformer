@@ -38,7 +38,11 @@ class GeometricStructureEmbedding(nn.Module):
         dist_map = torch.sqrt(pairwise_distance(points, points))  # (B, N, N)
         d_indices = dist_map / self.sigma_d
 
-        k = self.angle_k
+        # 点数不足时 topk 会越界（退化帧可能只有 1~3 个超点）。
+        # 少于 2 个点无法构造三元组，返回 None 由 forward 跳过角度编码。
+        if num_point < 2:
+            return d_indices, None
+        k = min(self.angle_k, num_point - 1)
         knn_indices = dist_map.topk(k=k + 1, dim=2, largest=False)[1][:, :, 1:]  # (B, N, k)
         knn_indices = knn_indices.unsqueeze(3).expand(batch_size, num_point, k, 3)  # (B, N, k, 3)
         expanded_points = points.unsqueeze(1).expand(batch_size, num_point, num_point, 3)  # (B, N, N, 3)
@@ -59,6 +63,9 @@ class GeometricStructureEmbedding(nn.Module):
 
         d_embeddings = self.embedding(d_indices)
         d_embeddings = self.proj_d(d_embeddings)
+
+        if a_indices is None:
+            return d_embeddings
 
         a_embeddings = self.embedding(a_indices)
         a_embeddings = self.proj_a(a_embeddings)

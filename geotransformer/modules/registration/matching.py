@@ -115,6 +115,7 @@ def extract_correspondences_from_scores_topk(
         src_corr_indices (LongTensor): (C,)
         corr_scores (Tensor): (C,)
     """
+    k = min(k, scores_mat.numel())
     corr_indices = scores_mat.view(-1).topk(k=k, largest=largest)[1]
     ref_corr_indices = corr_indices // scores_mat.shape[1]
     src_corr_indices = corr_indices % scores_mat.shape[1]

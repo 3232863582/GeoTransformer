@@ -148,8 +148,8 @@ class Evaluator(nn.Module):
         c_precision = self.evaluate_coarse(output_dict)
         f_precision = self.evaluate_fine(output_dict, data_dict)
         rre, rte, rmse, recall = self.evaluate_registration(output_dict, data_dict)
-        print("Error(R)", rre)
-        print("Error(R)", rte)
+        # print("Error(R)", rre)
+        # print("Error(R)", rte)
         # print("Error(R)", rmse)
         # print("Error(R)", recall)
         return {

@@ -1,7 +1,12 @@
 import argparse
 import time
+import warnings
 
 import torch.optim as optim
+
+# PyTorch 2.x 在 logical_and 广播时会产生 "An output ... was resized" 的弃用警告，
+# 消息里带形状导致无法按位置去重，每个样本都会重复刷屏。该警告不影响结果，直接屏蔽。
+warnings.filterwarnings('ignore', message='An output with one or more elements was resized')
 
 from geotransformer.engine import EpochBasedTrainer
 
